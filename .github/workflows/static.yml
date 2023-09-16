@@ -39,9 +39,9 @@ jobs:
           run: nix build .\#packages.x86_64-linux.docs.optionsCommonMark
 
       - name: Convert result
-        uses: docker://pandoc/latex:2.9
+        uses: docker://pandoc/core:3
         with:
-          args: ./result --output=result.html
+          args: ./result -f commonmark --output=result.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v3
