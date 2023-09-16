@@ -1,14 +1,13 @@
+# TODO:
+# A fake dbus like this Will hide tray and fix some issues, 
+# but some apps will keep running in backgroud
+# 
+# fake_dbus = if fake_dbus then "export $(dbus-launch)" else "";
+
 { lib, pkgs, ... }:
 
 with builtins;
 with lib;
-
-# NOTE:
-# A fake dbus like this Will hide tray and fix some issues, 
-# but some apps will keep running in backgroud
-#
-# fake_dbus =
-#   if fake_dbus then "export $(dbus-launch)" else "";
 
 let
   pkgsi686Linux = pkgs.pkgsi686Linux;
@@ -267,6 +266,7 @@ rec {
         in
         pkgs.stdenv.mkDerivation {
           name = "${_package.name}-bwrap";
+          passthru.noBwrap = _package;
           buildCommand = ''
             #
             # Copy and bwrap all binaries
@@ -294,12 +294,21 @@ rec {
         };
     in
     makeOverridable
-      (x: (
+      (x:
+        let
+          bwrapped_package = (_derivation x);
+        in
         if _args.symlinkJoin
         # make man pages, desktop entries and libs available
-        then pkgs.symlinkJoin { name = "${_args.package.name}-bwraplink"; paths = [ (_derivation x) (maybeOverride _args.package x) ]; }
-        else (_derivation x)
-      ))
+        then
+          pkgs.symlinkJoin
+            {
+              name = "${_args.package.name}-bwraplink";
+              paths = [ bwrapped_package (maybeOverride _args.package x) ];
+              passthru = bwrapped_package.passthru;
+            }
+        else bwrapped_package
+      )
       { };
 
   fhsIt = (fhsIt_args:

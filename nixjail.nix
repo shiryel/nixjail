@@ -19,7 +19,7 @@ with my_lib;
 
       shared_options = with types; {
         install = mkOption {
-          default = false;
+          default = true;
           type = bool;
           description = mdDoc "Add package to `environment.systemPackages`";
         };
@@ -272,6 +272,6 @@ with my_lib;
       assert isList bwrap_overlays;
       assert isFunction fhs_overlays;
       # order matters
-      [ (f: p: { _no_bwrap = p; }) ] ++ [ fhs_overlays ] ++ bwrap_overlays;
+      [ fhs_overlays ] ++ bwrap_overlays;
   };
 }
