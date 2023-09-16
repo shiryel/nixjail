@@ -36,7 +36,9 @@ jobs:
         uses: cachix/install-nix-action@v22
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          run: nix build .\#packages.x86_64-linux.docs.optionsCommonMark
+
+      - name: Build docs
+        run: nix build .\#packages.x86_64-linux.docs.optionsCommonMark
 
       - name: Convert result
         uses: docker://pandoc/core:3
