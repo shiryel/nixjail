@@ -33,12 +33,12 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install nix
-        uses: cachix/install-nix-action@v22
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+        uses: cachix/install-nix-action@v23
 
       - name: Build docs
-        run: nix build .\#packages.x86_64-linux.docs.optionsCommonMark
+        run: nix build .\#legacyPackages.x86_64-linux.docs.optionsCommonMark
+
+      - run: ls
 
       - name: Convert result
         uses: docker://pandoc/core:3

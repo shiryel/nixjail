@@ -25,7 +25,7 @@ with my_lib;
         };
 
         homeDirRoot = mkOption {
-          default = "~/bwrap";
+          default = "$HOME/bwrap";
           type = str;
           description = mdDoc "Root for the `autoBindHome`";
         };
@@ -90,12 +90,12 @@ with my_lib;
           description = mdDoc ''
             Adds the following read-only binds:
 
-            "~/.config/mimeapps.list"
-            "~/.local/share/applications/mimeapps.list"
-            "~/.config/dconf"
-            "~/.config/gtk-3.0/settings.ini"
-            "~/.config/gtk-4.0/settings.ini"
-            "~/.gtkrc-2.0"
+            "$HOME/.config/mimeapps.list"
+            "$HOME/.local/share/applications/mimeapps.list"
+            "$HOME/.config/dconf"
+            "$HOME/.config/gtk-3.0/settings.ini"
+            "$HOME/.config/gtk-4.0/settings.ini"
+            "$HOME/.gtkrc-2.0"
           '';
         };
 
@@ -241,6 +241,10 @@ with my_lib;
       assert isList fhs_packages;
       bwrap_packages ++ fhs_packages;
 
+    # FIXME:
+    # if nixpkgs /pkgs/top-level/aliases.nix has an alias: X = Y;
+    # and the user create an overlay like: { Y = X; }
+    # them we will have an infinite recursion on the `checkInPkgs` function
     nixpkgs.overlays =
       let
         bwrap_overlays = pipe cfg.bwrap.profiles [

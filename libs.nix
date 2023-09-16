@@ -19,7 +19,7 @@ rec {
     , rwBinds ? [ ] # [string] | [{from: string; to: string;}]
     , roBinds ? [ ] # [string] | [{from: string; to: string;}]
     , autoBindHome ? true
-    , homeDirRoot ? "~/bwrap"
+    , homeDirRoot ? "$HOME/bwrap"
     , defaultBinds ? true
     , dri ? false # video acceleration
     , dev ? false # Vulkan support / devices usage
@@ -52,7 +52,7 @@ rec {
         _auto_bind_home =
           if autoBindHome then [{
             from = "${homeDirRoot}/${name}";
-            to = "~/";
+            to = "$HOME";
           }]
           else
             [ ];
@@ -76,30 +76,33 @@ rec {
           # the program call itself (and create a new bwrap)
           (b: b ++ (map (x: if isList (match ".*(bwrap).*" x.from) then [{ from = x.from; to = x.from; }] else [ ]) b))
           lists.flatten
-          (map (x: ''--bind-try $(readlink -mn ${x.from}) ${x.to}''))
-          (concatStringsSep "\n")
+          (map (x: ''--bind-try $(${pkgs.coreutils}/bin/readlink -mn "${x.from}") "${x.to}"''))
+          (concatStringsSep "\n    ")
         ];
 
         _extra_roBinds =
           if defaultBinds then [
-            "~/.config/mimeapps.list"
-            "~/.local/share/applications/mimeapps.list"
-            "~/.config/dconf"
-            "~/.config/gtk-3.0/settings.ini"
-            "~/.config/gtk-4.0/settings.ini"
-            "~/.gtkrc-2.0"
+            "$HOME/.config/mimeapps.list"
+            "$HOME/.local/share/applications/mimeapps.list"
+            "$HOME/.config/dconf"
+            "$HOME/.config/gtk-2.0/gtkrc"
+            "$HOME/.config/gtk-2.0/gtkfilechooser.ini"
+            "$HOME/.config/gtk-3.0/settings.ini"
+            "$HOME/.config/gtk-3.0/bookmarks"
+            "$HOME/.config/gtk-4.0/settings.ini"
+            "$HOME/.config/gtk-4.0/bookmarks"
           ] else [ ];
 
         _roBinds = pipe (roBinds ++ _extra_roBinds) [
           _normalize_binds
-          (map (x: ''--ro-bind-try $(readlink -mn ${x.from}) ${x.to}''))
-          (concatStringsSep "\n")
+          (map (x: ''--ro-bind-try $(${pkgs.coreutils}/bin/readlink -mn "${x.from}") "${x.to}"''))
+          (concatStringsSep "\n    ")
         ];
 
         # mkdir -p (only if bwrap is on the name)
         _mkdir = pipe (_auto_bind_home ++ rwBinds) [
           _normalize_binds
-          (map (x: if isList (match ".*(bwrap).*" x.from) then "mkdir -p ${x.from}" else ""))
+          (map (x: if isList (match ".*(bwrap).*" x.from) then ''mkdir -p "${x.from}"'' else ""))
           (concatStringsSep "\n")
         ];
 
@@ -206,8 +209,8 @@ rec {
       )
   );
 
-  # NOTE: Remember to follow the binding order from ~/
-  # eg: ~/ ~/.config ~/.config/*
+  # NOTE: Remember to follow the binding order from $HOME/
+  # eg: $HOME/ $HOME/.config $HOME/.config/*
   bwrapIt = bwrapIt_args:
     let
       _args = _bwrapIt_args bwrapIt_args;
@@ -223,8 +226,8 @@ rec {
             # in the case of this EOF, we set the envs that will be used by the next EOF
             cat << EOF > "$out_path"
               #!${pkgs.stdenv.shell} -e
-              path="${path_var}"
-              i="$i"
+              _path="${path_var}"
+              _i="$i"
             EOF
 
             # this EOF is special, 'EOF' escapes all $ by default, preventing unexpected iteractions
@@ -258,7 +261,7 @@ rec {
                 ${rwBinds}
                 ${roBinds}
                 ${extraConfig}
-                "$path/$i" ${args}
+                "$_path/$_i" ${args}
                 )
               exec -a "$0" "''${cmd[@]}"
             EOF

@@ -16,7 +16,10 @@
         #  })
         #];
       };
-      packages = forAllSystems (system:
+
+      # when using "packages" `nix flake show` gives "error: expected a derivation"
+      # to build docs use: nix build .\#legacyPackages.x86_64-linux.docs.optionsJSON
+      legacyPackages = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
           lib = pkgs.lib;
