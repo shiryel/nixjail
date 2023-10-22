@@ -217,7 +217,9 @@ with my_lib;
             # list of packages names for the `environment.systemPackages` attr
             (if install then
               pipe (packages cfg.pkgs cfg.pkgs) [
-                (mapAttrsToList (_package_name: package: package))
+                # we need to use cfg.pkgs."${package_name}" because _package would be the
+                # version BEFORE the overlay IF the package_name is not the same attr as _package
+                (mapAttrsToList (package_name: _package: cfg.pkgs."${package_name}"))
               ]
             else
               [ ]))
