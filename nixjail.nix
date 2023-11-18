@@ -1,3 +1,19 @@
+# NixJail --- Bwrap wrapper for nixpkgs
+# Copyright (C) 2023 Shiryel <contact@shiryel.com>
+#
+# This library is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this library. If not, see <https://www.gnu.org/licenses/>.
+
 { config, lib, pkgs, ... }@inputs:
 
 with builtins;
@@ -22,12 +38,6 @@ with my_lib;
           default = true;
           type = bool;
           description = mdDoc "Add package to `environment.systemPackages`";
-        };
-
-        homeDirRoot = mkOption {
-          default = "$HOME/bwrap";
-          type = str;
-          description = mdDoc "Root for the `autoBindHome`";
         };
 
         autoBindHome = mkOption {
@@ -128,11 +138,22 @@ with my_lib;
         internal = true;
       };
       fhs = {
+        defaultHomeDirRoot = with types; mkOption {
+          default = "$HOME/nixjail";
+          type = str;
+          description = mdDoc "Default root dir, used by `homeDirRoot`";
+        };
         profiles = with types; mkOption {
           default = [ ];
           description = mdDoc "Configure profiles for the `packages` list, using the further options to configure them with bwrap";
           type = listOf (submodule {
             options = {
+              homeDirRoot = mkOption {
+                default = cfg.fhs.defaultHomeDirRoot;
+                type = str;
+                description = mdDoc "Root dir for the `autoBindHome`";
+              };
+
               name = mkOption {
                 default = null;
                 type = str;
@@ -175,11 +196,22 @@ with my_lib;
       };
 
       bwrap = {
+        defaultHomeDirRoot = with types; mkOption {
+          default = "$HOME/nixjail";
+          type = str;
+          description = mdDoc "Default root dir, used by `homeDirRoot`";
+        };
         profiles = with types; mkOption {
           default = [ ];
           description = mdDoc "Configure profiles for the `packages` list, using the further options to configure them with bwrap";
           type = listOf (submodule {
             options = {
+              homeDirRoot = mkOption {
+                default = cfg.bwrap.defaultHomeDirRoot;
+                type = str;
+                description = mdDoc "Root dir for the `autoBindHome`";
+              };
+
               packages = mkOption {
                 default = final: prev: { };
                 type = mkOptionType {
@@ -194,7 +226,7 @@ with my_lib;
               symlinkJoin = mkOption {
                 default = true;
                 type = bool;
-                description = mdDoc "If `false` it will disable the merge of the generated bwrapped package with the original content (like desktop entries, libs and man pages)";
+                description = mdDoc "If `false` it disables the merge of the generated bwrapped package with the original content (like desktop entries, libs and man pages)";
               };
 
               ldCache = mkOption {

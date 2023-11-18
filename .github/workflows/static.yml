@@ -38,8 +38,6 @@ jobs:
       - name: Build docs
         run: nix build .\#legacyPackages.x86_64-linux.docs.optionsCommonMark
 
-      - run: ls
-
       - name: Convert result
         uses: docker://pandoc/core:3
         with:

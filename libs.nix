@@ -1,13 +1,25 @@
-# TODO:
-# A fake dbus like this Will hide tray and fix some issues, 
-# but some apps will keep running in backgroud
-# 
-# fake_dbus = if fake_dbus then "export $(dbus-launch)" else "";
+# NixJail --- Bwrap wrapper for nixpkgs
+# Copyright (C) 2023 Shiryel <contact@shiryel.com>
+#
+# This library is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this library. If not, see <https://www.gnu.org/licenses/>.
 
 { lib, pkgs, ... }:
 
 with builtins;
 with lib;
+
+# TODO: integrate with https://github.com/flatpak/xdg-dbus-proxy
 
 let
   pkgsi686Linux = pkgs.pkgsi686Linux;
@@ -19,7 +31,7 @@ rec {
     , rwBinds ? [ ] # [string] | [{from: string; to: string;}]
     , roBinds ? [ ] # [string] | [{from: string; to: string;}]
     , autoBindHome ? true
-    , homeDirRoot ? "$HOME/bwrap"
+    , homeDirRoot ? "$HOME/nixjail"
     , defaultBinds ? true
     , dri ? false # video acceleration
     , dev ? false # Vulkan support / devices usage
@@ -71,10 +83,10 @@ rec {
           _normalize_binds
           # Sometimes a program will call itself, and their home will be "new" without the
           # files that it was working with (or without the file of others programs that uses
-          # the same bwrap enviroment, like steam, steam-run and protontricks). To fix this
-          # problem we bind the bwrap enviroment inside itself, so it will be available in case
+          # the same bwrap environment, like steam, steam-run and protontricks). To fix this
+          # problem we bind the bwrap environment inside itself, so it will be available in case
           # the program call itself (and create a new bwrap)
-          (b: b ++ (map (x: if isList (match ".*(bwrap).*" x.from) then [{ from = x.from; to = x.from; }] else [ ]) b))
+          (b: b ++ (map (x: if isList (match "${lib.strings.escapeRegex homeDirRoot}.*" x.from) then [{ from = x.from; to = x.from; }] else [ ]) b))
           lists.flatten
           (map (x: ''--bind-try $(${pkgs.coreutils}/bin/readlink -mn "${x.from}") "${x.to}"''))
           (concatStringsSep "\n    ")
@@ -99,10 +111,10 @@ rec {
           (concatStringsSep "\n    ")
         ];
 
-        # mkdir -p (only if bwrap is on the name)
+        # mkdir -p (only if `homeDirRoot` is on the name)
         _mkdir = pipe (_auto_bind_home ++ rwBinds) [
           _normalize_binds
-          (map (x: if isList (match ".*(bwrap).*" x.from) then ''mkdir -p "${x.from}"'' else ""))
+          (map (x: if isList (match "${lib.strings.escapeRegex homeDirRoot}.*" x.from) then ''mkdir -p "${x.from}"'' else ""))
           (concatStringsSep "\n")
         ];
 
