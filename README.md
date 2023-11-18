@@ -1,5 +1,5 @@
 # NixJail 
-A simple bwrap wrapper for nixpkgs
+Sandbox your nixpkgs easily with bwrap!
 
 ## Features
 
@@ -69,6 +69,8 @@ After adding NixJail as a module you can use it anywhere on your config, eg:
     }
 ```
 Rebuild your system, the packages will be installed automatically, and use `cat $(which discord)` to see the result ;)
+
+---
 
 ## Advanced examples
 
