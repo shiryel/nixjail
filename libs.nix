@@ -163,6 +163,8 @@ rec {
       assert isBool ldCache;
       assert isBool symlinkJoin;
       let
+        # ldCache code adapted from: https://github.com/NixOS/nixpkgs/blob/master/pkgs/build-support/build-fhsenv-bubblewrap/default.nix#L195
+        #
         # Our glibc will look for the cache in its own path in `/nix/store`.
         # As such, we need a cache to exist there, because pressure-vessel
         # depends on the existence of an ld cache.
