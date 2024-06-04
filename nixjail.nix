@@ -40,16 +40,20 @@ with my_lib;
           description = mdDoc "Add package to `environment.systemPackages`";
         };
 
-        autoBindHome = mkOption {
-          default = true;
-          type = bool;
-          description = mdDoc "Automatically creates a home directory on `home_dir_root`";
-        };
-
         args = mkOption {
           default = ''"$@"'';
           type = str;
           description = mdDoc "arguments to pass to the packages";
+        };
+
+        #
+        # BWRAP
+        #
+
+        autoBindHome = mkOption {
+          default = true;
+          type = bool;
+          description = mdDoc "Automatically creates a home directory on `home_dir_root`";
         };
 
         dri = mkOption {
@@ -65,7 +69,7 @@ with my_lib;
         };
 
         xdg = mkOption {
-          default = "ro";
+          default = false;
           type = oneOf [ bool (enum [ "ro" ]) ];
           description = mdDoc "If `true` add `--bind-try $XDG_RUNTIME_DIR $XDG_RUNTIME_DIR`";
         };
@@ -114,6 +118,65 @@ with my_lib;
           type = bool;
           description = mdDoc "If `false` removes `--unshare-all`, not recommended!";
         };
+
+        #
+        # DBUS PROXY
+        #
+
+        dbusProxy =
+          let
+            shared_dbus_options = {
+              sees = mkOption {
+                default = [ ];
+                type = listOf str;
+                description = "Adds --see";
+              };
+
+              talks = mkOption {
+                default = [ ];
+                type = listOf str;
+                description = "Adds --talk";
+              };
+
+              owns = mkOption {
+                default = [ ];
+                type = listOf str;
+                description = "Adds --own";
+              };
+
+              calls = mkOption {
+                default = [ ];
+                type = listOf str;
+                description = "Adds --call";
+              };
+
+              broadcasts = mkOption {
+                default = [ ];
+                type = listOf str;
+                description = "Adds --broadcast";
+              };
+            };
+          in
+          {
+            enable = mkOption {
+              default = false;
+              type = bool;
+              description = "Enables xdg-dbus-proxy";
+            };
+
+            log = mkOption {
+              default = false;
+              type = bool;
+              description = "Enables xdg-dbus-proxy logs";
+            };
+
+            user = shared_dbus_options;
+            system = shared_dbus_options;
+          };
+
+        #
+        # EXTRA
+        #
 
         keepSession = mkOption {
           default = false;
@@ -227,6 +290,12 @@ with my_lib;
                 default = true;
                 type = bool;
                 description = mdDoc "If `false` it disables the merge of the generated bwrapped package with the original content (like desktop entries, libs and man pages)";
+              };
+
+              removeDesktopItems = mkOption {
+                default = false;
+                type = bool;
+                description = mdDoc "Removes all desktop items from derivation, requires `symlinkJoin = false` to work";
               };
 
               ldCache = mkOption {

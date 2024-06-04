@@ -14,20 +14,60 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this library. If not, see <https://www.gnu.org/licenses/>.
 
+# TODO: some times when using nixjail with an overlay the nixos
+# will use the overlay instead of the nixjail result, an workaround
+# is the usage of { new_name = package; } instead of { package = package; }
+
 { lib, pkgs, ... }:
 
 with builtins;
 with lib;
 
-# TODO: integrate with https://github.com/flatpak/xdg-dbus-proxy
-
 let
   pkgsi686Linux = pkgs.pkgsi686Linux;
 in
 rec {
-  _generic_args = (
+
+  ##################
+  # HIGH LEVEL API #
+  ##################
+
+  # NOTE: Remember to follow the binding order from $HOME/
+  # eg: $HOME/ $HOME/.config $HOME/.config/*
+  bwrapIt = args:
+    makeOverridable
+      (override_attrs:
+        let
+          _args = (bwrapItArgs args);
+          _bwrapped_derivation = (bwrapDerivataion _args override_attrs);
+        in
+        if _args.symlinkJoin
+        # make man pages, desktop entries and libs available
+        then
+          pkgs.symlinkJoin
+            {
+              name = "${_args.package.name}-bwraplink";
+              paths = [ _bwrapped_derivation (maybeOverride _args.package override_attrs) ];
+              passthru = _bwrapped_derivation.passthru;
+            }
+        else _bwrapped_derivation
+      )
+      { };
+
+  fhsIt = args:
+    let
+      _args = fhsItArgs args;
+    in
+    fhsUserEnv _args;
+
+  #################################
+  # CONFIG FOR BOTH BWRAP AND FHS #
+  #################################
+
+  genericArgs = (
     { name ? null
     , args ? ''"$@"''
+      # BWRAP
     , rwBinds ? [ ] # [string] | [{from: string; to: string;}]
     , roBinds ? [ ] # [string] | [{from: string; to: string;}]
     , autoBindHome ? true
@@ -35,10 +75,13 @@ rec {
     , defaultBinds ? true
     , dri ? false # video acceleration
     , dev ? false # Vulkan support / devices usage
-    , xdg ? "ro" # true | false | "ro"
+    , xdg ? false # true | false | "ro"
     , net ? false
     , tmp ? false # some tray icons needs it
     , unshareAll ? true
+      # DBUS PROXY
+    , dbusProxy ? { }
+      # EXTRA
       # Fixes "cannot set terminal process group (-1)" but is 
       # not recommended because of a security issue with TIOCSTI [1]
       # [1] - https://wiki.archlinux.org/title/Bubblewrap#New_session
@@ -47,6 +90,7 @@ rec {
     }:
       assert isString name;
       assert isString args;
+      # BWRAP
       assert isList rwBinds;
       assert isList roBinds;
       assert isBool autoBindHome;
@@ -58,9 +102,16 @@ rec {
       assert isBool net;
       assert isBool tmp;
       assert isBool unshareAll;
+      # DBUS PROXY
+      assert isAttrs dbusProxy;
+      # EXTRA
       assert isBool keepSession;
       assert isList extraConfig;
       let
+        #########
+        # BWRAP #
+        #########
+
         _auto_bind_home =
           if autoBindHome then [{
             from = "${homeDirRoot}/${name}";
@@ -128,12 +179,82 @@ rec {
 
         # read-only by default (--ro-bind /run /run)
         _xdg =
-          if xdg == "ro" then "" else
-          if xdg then "--bind-try $XDG_RUNTIME_DIR $XDG_RUNTIME_DIR" else "--tmpfs $XDG_RUNTIME_DIR";
+          if xdg == "ro" then "--ro-bind-try $XDG_RUNTIME_DIR $XDG_RUNTIME_DIR" else
+          if xdg then "--bind-try $XDG_RUNTIME_DIR $XDG_RUNTIME_DIR" else ''
+            # audio / video
+            --ro-bind-try $XDG_RUNTIME_DIR/pulse $XDG_RUNTIME_DIR/pulse 
+            $(for file in `ls "$XDG_RUNTIME_DIR/"{pipewire,wayland}-*`; do echo "--ro-bind $file $file"; done)
+          '';
 
         _net = if net then "--share-net" else "";
         _tmp = if tmp then "--bind-try /tmp /tmp" else "--tmpfs /tmp";
         _unshare = if unshareAll then "--unshare-all" else "";
+
+        ##############
+        # DBUS PROXY #
+        ##############
+
+        _dbus_args = optionalString dbusProxy.enable (concatStringsSep "\n" [
+          (concatMapStrings (x: ''--see="${x}" '') dbusProxy.user.sees)
+          (concatMapStrings (x: ''--talk="${x}" '') dbusProxy.user.talks)
+          (concatMapStrings (x: ''--own="${x}" '') dbusProxy.user.owns)
+          (concatMapStrings (x: ''--call="${x}" '') dbusProxy.user.calls)
+          (concatMapStrings (x: ''--broadcast="${x}" '') dbusProxy.user.broadcasts)
+        ]);
+        _dbus_system_args = optionalString dbusProxy.enable (concatStringsSep "" [
+          (concatMapStrings (x: ''--see="${x}" '') dbusProxy.system.sees)
+          (concatMapStrings (x: ''--talk="${x}" '') dbusProxy.system.talks)
+          (concatMapStrings (x: ''--own="${x}" '') dbusProxy.system.owns)
+          (concatMapStrings (x: ''--call="${x}" '') dbusProxy.system.calls)
+          (concatMapStrings (x: ''--broadcast="${x}" '') dbusProxy.system.broadcasts)
+        ]);
+
+        _dbus_proxy = optionalString dbusProxy.enable ''
+          bwrap_cmd=(
+            ${getBin pkgs.bubblewrap}/bin/bwrap
+            --tmpfs /
+            --ro-bind /nix /nix
+            --bind $XDG_RUNTIME_DIR $XDG_RUNTIME_DIR
+            --bind /run/dbus/system_bus_socket /run/dbus/system_bus_socket
+            --new-session
+            --unshare-all
+            --die-with-parent
+            --clearenv
+            --
+          )
+
+          dbus_cmd=(
+            ${getBin pkgs.xdg-dbus-proxy}/bin/xdg-dbus-proxy
+            $DBUS_SESSION_BUS_ADDRESS $XDG_RUNTIME_DIR/dbus-proxy-${name}-bus
+            --filter ${optionalString dbusProxy.log "--log"}
+            ${_dbus_args}
+          )
+
+          dbus_system_cmd=(
+            ${getBin pkgs.xdg-dbus-proxy}/bin/xdg-dbus-proxy
+            "unix:path=/run/dbus/system_bus_socket" "$XDG_RUNTIME_DIR/dbus-proxy-${name}-system_bus"
+            --filter ${optionalString dbusProxy.log "--log"}
+            ${_dbus_system_args}
+          )
+
+          exec ''${bwrap_cmd[@]} ''${dbus_cmd[@]} &
+          exec ''${bwrap_cmd[@]} ''${dbus_system_cmd[@]} &
+
+          while ! test -S "$XDG_RUNTIME_DIR/dbus-proxy-${name}-bus"; do sleep 0.1; done
+          while ! test -S "$XDG_RUNTIME_DIR/dbus-proxy-${name}-system_bus"; do sleep 0.1; done
+        '';
+
+        _dbus_binds =
+          if dbusProxy.enable then ''
+            --bind $XDG_RUNTIME_DIR/dbus-proxy-${name}-bus $XDG_RUNTIME_DIR/bus
+            --bind $XDG_RUNTIME_DIR/dbus-proxy-${name}-system_bus /run/dbus/system_bus_socket
+          '' else
+            "--ro-bind $XDG_RUNTIME_DIR/bus $XDG_RUNTIME_DIR/bus";
+
+        #########
+        # EXTRA #
+        #########
+
         _new_session = if keepSession then "" else "--new-session";
         _extraConfig = concatStringsSep " " extraConfig;
       in
@@ -148,19 +269,40 @@ rec {
         net = _net;
         tmp = _tmp;
         unshare = _unshare;
+        dbusProxy = _dbus_proxy;
+        dbusBinds = _dbus_binds;
         new_session = _new_session;
         extraConfig = _extraConfig;
       }
   );
 
-  _bwrapIt_args = (
+  # only tries to override when necessary, otherwise it
+  # would fail with packages that can't override
+  maybeOverride = (package: override_attrs:
+    if (override_attrs == { })
+    then package
+    else
+      (
+        if package?override
+        then package.override override_attrs
+        else throw "package ${package} is not overridable"
+      )
+  );
+
+  ##########################
+  # BWRAP HELPER FUNCTIONS #
+  ##########################
+
+  bwrapItArgs = (
     { package ? null
     , symlinkJoin ? true
     , ldCache ? false
+    , removeDesktopItems ? false
     , ...
-    }@bwrapIt_args:
+    }@args:
       assert package != null;
       assert isBool ldCache;
+      assert isBool removeDesktopItems;
       assert isBool symlinkJoin;
       let
         # ldCache code adapted from: https://github.com/NixOS/nixpkgs/blob/master/pkgs/build-support/build-fhsenv-bubblewrap/default.nix#L195
@@ -187,178 +329,206 @@ rec {
           else
             "";
       in
-      (_generic_args (removeAttrs bwrapIt_args [ "package" "symlinkJoin" "ldCache" ])) // {
-        inherit package symlinkJoin;
+      (genericArgs (removeAttrs args [ "package" "symlinkJoin" "removeDesktopItems" "ldCache" ])) // {
+        inherit package symlinkJoin removeDesktopItems;
         ldCache = _ldCache;
       }
   );
 
-  _fhsIt_args = (
+  bwrapDerivataion =
+    { package
+    , dbusProxy
+    , mkdir
+    , xdg
+    , ldCache
+    , new_session
+    , unshare
+    , dev_or_dri
+    , net
+    , tmp
+    , rwBinds
+    , roBinds
+    , dbusBinds
+    , extraConfig
+    , args
+    , removeDesktopItems
+    , ...
+    }: override_attrs:
+    let
+      _package = maybeOverride package override_attrs;
+      _main_program = if _package.meta ? mainProgram then _package.meta.mainProgram else _package.name;
+
+      _bwrap_script = path_var: ''
+        # We need to split this script in 2 EOFs, because of how the $ interact with bash and nix
+        # in the case of this EOF, we set the envs that will be used by the next EOF
+        cat << EOF > "$out_path"
+          #!${pkgs.stdenv.shell} -e
+          set -eux -o pipefail
+
+          _path="${path_var}"
+          _i="$i"
+        EOF
+
+        # this EOF is special, 'EOF' escapes all $ by default, preventing unexpected iteractions
+        # and making sure that they will only be interpreted when running the generated script
+        cat << 'EOF' >> "$out_path"
+          # Run xdg-dbux-proxy so we can bind it later
+          ${dbusProxy}
+
+          ${mkdir}
+          cmd=(
+            ${getBin pkgs.bubblewrap}/bin/bwrap
+            --tmpfs /
+            --tmpfs /run
+            --ro-bind-try /run/booted-system /run/booted-system
+            --ro-bind-try /run/current-system /run/current-system
+            --ro-bind-try /run/opengl-driver /run/opengl-driver
+            --ro-bind-try /run/opengl-driver-32 /run/opengl-driver-32
+            ${xdg}
+            # fix sh and bash for some scripts
+            --ro-bind-try /bin/sh /bin/sh
+            --ro-bind-try /bin/sh /bin/bash
+            --ro-bind-try /etc /etc
+            --ro-bind-try /nix /nix
+            --ro-bind-try /sys /sys
+            --ro-bind-try /var /var
+            --ro-bind-try /usr /usr
+            --ro-bind-try /opt /opt
+            --proc /proc
+            --tmpfs /home
+            --tmpfs /keep
+            --die-with-parent
+            ${ldCache}
+            ${new_session}
+            ${unshare}
+            ${dev_or_dri}
+            ${net}
+            ${tmp}
+            ${rwBinds}
+            ${roBinds}
+            ${dbusBinds}
+            ${extraConfig}
+            --
+            "$_path/$_i" ${args}
+          )
+          exec -a "$0" "''${cmd[@]}"
+        EOF
+      '';
+    in
+    pkgs.stdenv.mkDerivation {
+      name = "${_package.name}-bwrap";
+      passthru = _package.passthru // { noBwrap = _package; };
+      buildCommand = ''
+        #
+        # Copy and bwrap all binaries
+        #
+        bin_path="${_package}/bin"
+        desktop_path="${_package}/share/applications"
+
+        for i in $(${pkgs.coreutils}/bin/ls $bin_path); do
+          mkdir -p "$out/bin"
+          out_path="$out/bin/$i"
+
+          ${_bwrap_script "$bin_path"}
+
+          chmod +x "$out_path"
+        done
+      '' + (if removeDesktopItems
+      then ""
+      else ''
+        for i in $(${pkgs.coreutils}/bin/ls $desktop_path); do
+          mkdir -p "$out/share/applications"
+          out_path="$out/share/applications/$i"
+
+          cp $desktop_path/$i $out_path
+          substituteInPlace $out_path --replace "${_package}" "$out"
+          substituteInPlace $out_path --replace "Exec=${_main_program}" "Exec=$out/bin/${_main_program}"
+        done
+      '');
+    };
+
+  ##########################
+  # FHS HELPER FUNCTIONS #
+  ##########################
+
+  fhsItArgs = (
     { runScript ? "$TERM"
     , profile ? ""
     , targetPkgs ? pkgs: [ ]
     , multiPkgs ? pkgs: [ ]
     , ...
-    }@fhsIt_args:
+    }@args:
       assert isString runScript;
       assert isFunction targetPkgs;
       assert isFunction multiPkgs;
       assert isString profile;
 
-      (_generic_args (removeAttrs fhsIt_args [ "runScript" "profile" "targetPkgs" "multiPkgs" ])) // {
+      (genericArgs (removeAttrs args [ "runScript" "profile" "targetPkgs" "multiPkgs" ])) // {
         inherit runScript profile targetPkgs multiPkgs;
       }
   );
 
-  # only tries to override when necessary, otherwise it
-  # would fail with packages that can't override
-  maybeOverride = (package: override_args:
-    if (override_args == { })
-    then package
-    else
-      (
-        if package?override
-        then package.override override_args
-        else throw "package ${package} is not overridable"
-      )
-  );
-
-  # NOTE: Remember to follow the binding order from $HOME/
-  # eg: $HOME/ $HOME/.config $HOME/.config/*
-  bwrapIt = bwrapIt_args:
+  fhsUserEnv =
+    { name
+    , dbusProxy
+    , mkdir
+    , runScript
+    , args
+    , targetPkgs
+    , multiPkgs
+    , profile
+    , xdg
+    , new_session
+    , unshare
+    , dev_or_dri
+    , net
+    , tmp
+    , rwBinds
+    , roBinds
+    , dbusBinds
+    , extraConfig
+    , ...
+    }:
     let
-      _args = _bwrapIt_args bwrapIt_args;
-
-      _derivation = override_args:
-        with _args;
-
-        let
-          _package = maybeOverride package override_args;
-
-          _bwrap_script = path_var: ''
-            # We need to split this script in 2 EOFs, because of how the $ interact with bash and nix
-            # in the case of this EOF, we set the envs that will be used by the next EOF
-            cat << EOF > "$out_path"
-              #!${pkgs.stdenv.shell} -e
-              _path="${path_var}"
-              _i="$i"
-            EOF
-
-            # this EOF is special, 'EOF' escapes all $ by default, preventing unexpected iteractions
-            # and making sure that they will only be interpreted when running the generated script
-            cat << 'EOF' >> "$out_path"
-              ${mkdir}
-              cmd=(
-                ${lib.getBin pkgs.bubblewrap}/bin/bwrap
-                --tmpfs /
-                --ro-bind-try /run /run
-                # fix sh and bash for some scripts
-                --ro-bind-try /bin/sh /bin/sh
-                --ro-bind-try /bin/sh /bin/bash
-                --ro-bind-try /etc /etc
-                --ro-bind-try /nix /nix
-                --ro-bind-try /sys /sys
-                --ro-bind-try /var /var
-                --ro-bind-try /usr /usr
-                --ro-bind-try /opt /opt
-                --proc /proc
-                --tmpfs /home
-                --tmpfs /keep
-                --die-with-parent
-                ${ldCache}
-                ${new_session}
-                ${unshare}
-                ${dev_or_dri}
-                ${xdg}
-                ${net}
-                ${tmp}
-                ${rwBinds}
-                ${roBinds}
-                ${extraConfig}
-                "$_path/$_i" ${args}
-                )
-              exec -a "$0" "''${cmd[@]}"
-            EOF
-          '';
-        in
-        pkgs.stdenv.mkDerivation {
-          name = "${_package.name}-bwrap";
-          passthru.noBwrap = _package;
-          buildCommand = ''
-            #
-            # Copy and bwrap all binaries
-            #
-            bin_path="${_package}/bin"
-            desktop_path="${_package}/share/applications"
-
-            for i in $(${pkgs.coreutils}/bin/ls $bin_path); do
-              mkdir -p "$out/bin"
-              out_path="$out/bin/$i"
-
-              ${_bwrap_script "$bin_path"}
-
-              chmod +x "$out_path"
-            done
-
-            for i in $(${pkgs.coreutils}/bin/ls $desktop_path); do
-              mkdir -p "$out/share/applications"
-              out_path="$out/share/applications/$i"
-
-              cp $desktop_path/$i $out_path
-              substituteInPlace $out_path --replace "${_package}" "$out"
-            done
-          '';
+      FHS =
+        pkgs.buildFHSUserEnvBubblewrap {
+          name = "${name}";
+          runScript = "${runScript} ${args}";
+          targetPkgs = targetPkgs;
+          multiPkgs = multiPkgs;
+          profile = profile;
+          extraOutputsToInstall = [ "dev" ];
+          extraBwrapArgs = [
+            "--proc /proc"
+            "--tmpfs /home"
+            "--tmpfs /keep"
+            "--tmpfs /run"
+            "--ro-bind /run/booted-system /run/booted-system"
+            "--ro-bind /run/current-system /run/current-system"
+            "--ro-bind /run/opengl-driver /run/opengl-driver"
+            "--ro-bind /run/opengl-driver-32 /run/opengl-driver-32"
+            #"--ro-bind /etc/ssh/ssh_config /etc/ssh/ssh_config" # keep ssh config from host
+            "${xdg}"
+            "--die-with-parent"
+            "${new_session}"
+            "${unshare}"
+            "${dev_or_dri}"
+            "${net}"
+            "${tmp}"
+            "${rwBinds}"
+            "${roBinds}"
+            "${dbusBinds}"
+            "${extraConfig}"
+          ];
         };
     in
-    makeOverridable
-      (x:
-        let
-          bwrapped_package = (_derivation x);
-        in
-        if _args.symlinkJoin
-        # make man pages, desktop entries and libs available
-        then
-          pkgs.symlinkJoin
-            {
-              name = "${_args.package.name}-bwraplink";
-              paths = [ bwrapped_package (maybeOverride _args.package x) ];
-              passthru = bwrapped_package.passthru;
-            }
-        else bwrapped_package
-      )
-      { };
-
-  fhsIt = (fhsIt_args:
-    (with (_fhsIt_args fhsIt_args);
-
     pkgs.writeScriptBin name ''
       #! ${pkgs.stdenv.shell} -e
+      # Run xdg-dbux-proxy so we can bind it later
+      ${dbusProxy}
+
       ${mkdir}
 
-      ${pkgs.buildFHSUserEnvBubblewrap {
-        name = "${name}";
-        runScript = "${runScript} ${args}";
-        targetPkgs = targetPkgs;
-        multiPkgs = multiPkgs;
-        profile = profile;
-        extraOutputsToInstall = [ "dev" ];
-        extraBwrapArgs = [
-          "--proc /proc"
-          "--tmpfs /home"
-          "--tmpfs /keep"
-          "--die-with-parent"
-          "${new_session}"
-          "${unshare}"
-          "${dev_or_dri}"
-          "${xdg}"
-          "${net}"
-          "${tmp}"
-          "${rwBinds}"
-          "${roBinds}"
-          "${extraConfig}"
-        ];
-      }}/bin/${name}
-    ''
-    )
-  );
+      ${FHS}/bin/${name}
+    '';
 }
