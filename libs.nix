@@ -78,6 +78,7 @@ rec {
     , xdg ? false # true | false | "ro"
     , net ? false
     , tmp ? false # some tray icons needs it
+    , ipc ? false
     , unshareAll ? true
       # DBUS PROXY
     , dbusProxy ? { }
@@ -101,6 +102,7 @@ rec {
       assert asserts.assertOneOf "bwrap.xdg" xdg [ "ro" true false ];
       assert isBool net;
       assert isBool tmp;
+      assert isBool ipc;
       assert isBool unshareAll;
       # DBUS PROXY
       assert isAttrs dbusProxy;
@@ -108,6 +110,14 @@ rec {
       assert isBool keepSession;
       assert isList extraConfig;
       let
+        # eg: hello_world-test -> HelloWorldTest
+        _normalized_name = pipe name [
+          (split "[^[:alpha:]|[:digit:]]") # split when not (a-Z or 0-9)
+          (filter isString)
+          (map (x: (lib.toUpper (substring 0 1 x)) + (substring 1 (-1) x)))
+          (lib.concatStrings)
+        ];
+
         #########
         # BWRAP #
         #########
@@ -188,7 +198,51 @@ rec {
 
         _net = if net then "--share-net" else "";
         _tmp = if tmp then "--bind-try /tmp /tmp" else "--tmpfs /tmp";
+        _ipc = if ipc then "" else "--unshare-ipc";
         _unshare = if unshareAll then "--unshare-all" else "";
+
+        ################
+        # FLATPAK INFO #
+        ################
+        # without /.flatpak-info, programs will not use the XDG Desktop Portal
+        # and instead will try to use the "default" portals, requiring that
+        # DBUS-PROXY be configured like:
+        #
+        #   dbusProxy = {
+        #     user = {
+        #       talks = [
+        #         "org.freedesktop.Notifications"
+        #         "org.kde.StatusNotifierWatcher"
+        #         # see: https://github.com/RalfJung/bubblebox/blob/master/profiles.py
+        #         "org.mozilla.firefox.*"
+        #         "org.mozilla.firefox_beta.*"
+        #       ];
+        #       #calls = [ "org.mozilla.firefox.*=@/org/mozilla/firefox/Remote" ];
+        #     };
+        #   };
+        #   roBinds = [{ from = "$HOME/bwrap/mozilla/firefox/profiles.ini"; to = "$HOME/.mozilla/firefox/profiles.ini"; }];
+        #
+        # So when using dbus-proxy we add the flatpak-info to be able to use the portals on
+        # https://flatpak.github.io/xdg-desktop-portal/docs/api-reference.html
+
+        _flatpak_info_data = pkgs.writeText "flatpak-info" (lib.generators.toINI { } {
+          Application = {
+            name = "com.nixjail.${_normalized_name}";
+            runtime = "runtime/com.nixjail.Platform/${pkgs.hostPlatform.parsed.cpu.name}";
+          };
+          Context.shared = concatStringsSep ";" ((lib.optional net "network") ++ (lib.optional ipc "ipc"));
+          "Session Bus Policy" =
+            let
+              mapPolicies = policies: type: builtins.map (x: { name = x; value = type; }) policies;
+            in
+            builtins.listToAttrs (
+              (mapPolicies dbusProxy.user.sees "see") ++
+              (mapPolicies dbusProxy.user.talks "talk") ++
+              (mapPolicies dbusProxy.user.owns "own")
+            );
+        });
+
+        _flatpak_info = if dbusProxy.enable then "--ro-bind ${_flatpak_info_data} /.flatpak_info" else "";
 
         ##############
         # DBUS PROXY #
@@ -216,6 +270,7 @@ rec {
             --ro-bind /nix /nix
             --bind $XDG_RUNTIME_DIR $XDG_RUNTIME_DIR
             --bind /run/dbus/system_bus_socket /run/dbus/system_bus_socket
+            ${_flatpak_info}
             --new-session
             --unshare-all
             --die-with-parent
@@ -226,14 +281,14 @@ rec {
           dbus_cmd=(
             ${getBin pkgs.xdg-dbus-proxy}/bin/xdg-dbus-proxy
             $DBUS_SESSION_BUS_ADDRESS $XDG_RUNTIME_DIR/dbus-proxy-${name}-bus
-            --filter ${optionalString dbusProxy.log "--log"}
+            --filter ${optionalString dbusProxy.debug "--log"}
             ${_dbus_args}
           )
 
           dbus_system_cmd=(
             ${getBin pkgs.xdg-dbus-proxy}/bin/xdg-dbus-proxy
             "unix:path=/run/dbus/system_bus_socket" "$XDG_RUNTIME_DIR/dbus-proxy-${name}-system_bus"
-            --filter ${optionalString dbusProxy.log "--log"}
+            --filter ${optionalString dbusProxy.debug "--log"}
             ${_dbus_system_args}
           )
 
@@ -268,7 +323,9 @@ rec {
         xdg = _xdg;
         net = _net;
         tmp = _tmp;
+        ipc = _ipc;
         unshare = _unshare;
+        flatpak_info = _flatpak_info;
         dbusProxy = _dbus_proxy;
         dbusBinds = _dbus_binds;
         new_session = _new_session;
@@ -346,8 +403,10 @@ rec {
     , dev_or_dri
     , net
     , tmp
+    , ipc
     , rwBinds
     , roBinds
+    , flatpak_info
     , dbusBinds
     , extraConfig
     , args
@@ -394,6 +453,7 @@ rec {
             --ro-bind-try /var /var
             --ro-bind-try /usr /usr
             --ro-bind-try /opt /opt
+            ${flatpak_info}
             --proc /proc
             --tmpfs /home
             --tmpfs /keep
@@ -404,6 +464,7 @@ rec {
             ${dev_or_dri}
             ${net}
             ${tmp}
+            ${ipc}
             ${rwBinds}
             ${roBinds}
             ${dbusBinds}

@@ -86,6 +86,12 @@ with my_lib;
           description = mdDoc "If `true` add `--bind-try /tmp /tmp`";
         };
 
+        ipc = mkOption {
+          default = false;
+          type = bool;
+          description = mdDoc "Share IPC";
+        };
+
         rwBinds = mkOption {
           default = [ ];
           type = listOf (oneOf [ str (submodule bind_from_to) ]);
@@ -125,35 +131,63 @@ with my_lib;
 
         dbusProxy =
           let
+            # Descriptions from: https://github.com/flatpak/xdg-dbus-proxy/blob/main/xdg-dbus-proxy.xml
+
+            # The policy for the filtering consists of a mapping from well-known names to a policy that is either SEE, TALK or OWN.
+            # The default initial policy is that the the user is only allowed to TALK to the bus itself (org.freedesktop.DBus, or
+            # no destination specified), and TALK to its own unique ID. All other clients are invisible.
             shared_dbus_options = {
               sees = mkOption {
                 default = [ ];
                 type = listOf str;
-                description = "Adds --see";
+                description = ''
+                  - The name/ID is visible in the ListNames reply
+                  - The name/ID is visible in the ListActivatableNames repl
+                  - You can call GetNameOwner on the name
+                  - You can call NameHasOwner on the name
+                  - You see NameOwnerChanged signals on the name
+                  - You see NameOwnerChanged signals on the ID when the client disconnects
+                  - You can call the GetXXX methods on the name/ID to get e.g. the peer pid
+                  - You get AccessDenied rather than NameHasNoOwner when sending messages to the name/ID
+                '';
               };
 
               talks = mkOption {
                 default = [ ];
                 type = listOf str;
-                description = "Adds --talk";
+                description = ''
+                  - You can send any method calls and signals to the name/ID
+                  - You will receive broadcast signals from the name/ID (if you have a match rule for them)
+                  - You can call StartServiceByName on the name
+                '';
               };
 
               owns = mkOption {
                 default = [ ];
                 type = listOf str;
-                description = "Adds --own";
+                description = ''
+                  - You are allowed to call RequestName/ReleaseName/ListQueuedOwners on the name
+                '';
               };
 
               calls = mkOption {
                 default = [ ];
                 type = listOf str;
-                description = "Adds --call";
+                description = ''
+                  In addition to the basic SEE/TALK/OWN policy, it is possible to specify more complicated rules about what method calls can be made on and what broadcast signals can be received from well-known names. A rule can restrict the allowed calls/signals to a specific object path or a subtree of object paths, and it can restrict the allowed interface down to an individual method or signal name.
+
+                  Rules are specified with the --call and --broadcast options. The RULE in these options determines what interfaces, methods and object paths are allowed. It must be of the form [METHOD][@PATH], where METHOD can be either '*' or a D-Bus interface, possible with a '.*' suffix, or a fully-qualified method name, and PATH is a D-Bus object path, possible with a '/*' suffix.
+                '';
               };
 
               broadcasts = mkOption {
                 default = [ ];
                 type = listOf str;
-                description = "Adds --broadcast";
+                description = ''
+                  In addition to the basic SEE/TALK/OWN policy, it is possible to specify more complicated rules about what method calls can be made on and what broadcast signals can be received from well-known names. A rule can restrict the allowed calls/signals to a specific object path or a subtree of object paths, and it can restrict the allowed interface down to an individual method or signal name.
+
+                  Rules are specified with the --call and --broadcast options. The RULE in these options determines what interfaces, methods and object paths are allowed. It must be of the form [METHOD][@PATH], where METHOD can be either '*' or a D-Bus interface, possible with a '.*' suffix, or a fully-qualified method name, and PATH is a D-Bus object path, possible with a '/*' suffix.
+                '';
               };
             };
           in
@@ -164,7 +198,7 @@ with my_lib;
               description = "Enables xdg-dbus-proxy";
             };
 
-            log = mkOption {
+            debug = mkOption {
               default = false;
               type = bool;
               description = "Enables xdg-dbus-proxy logs";
