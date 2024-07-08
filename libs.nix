@@ -149,7 +149,7 @@ rec {
           # the program call itself (and create a new bwrap)
           (b: b ++ (map (x: if isList (match "${lib.strings.escapeRegex homeDirRoot}.*" x.from) then [{ from = x.from; to = x.from; }] else [ ]) b))
           lists.flatten
-          (map (x: ''--bind-try $(${pkgs.coreutils}/bin/readlink -mn "${x.from}") "${x.to}"''))
+          (map (x: ''--bind-try "$(${pkgs.coreutils}/bin/readlink -mn "${x.from}")" "${x.to}"''))
           (concatStringsSep "\n    ")
         ];
 
@@ -168,7 +168,7 @@ rec {
 
         _roBinds = pipe (roBinds ++ _extra_roBinds) [
           _normalize_binds
-          (map (x: ''--ro-bind-try $(${pkgs.coreutils}/bin/readlink -mn "${x.from}") "${x.to}"''))
+          (map (x: ''--ro-bind-try "$(${pkgs.coreutils}/bin/readlink -mn "${x.from}")" "${x.to}"''))
           (concatStringsSep "\n    ")
         ];
 
@@ -422,7 +422,7 @@ rec {
         # in the case of this EOF, we set the envs that will be used by the next EOF
         cat << EOF > "$out_path"
           #!${pkgs.stdenv.shell} -e
-          set -eux -o pipefail
+          #set -eux -o pipefail
 
           _path="${path_var}"
           _i="$i"
@@ -472,7 +472,8 @@ rec {
             --
             "$_path/$_i" ${args}
           )
-          exec -a "$0" "''${cmd[@]}"
+          #exec -a "$0" "''${cmd[@]}"
+          exec "''${cmd[@]}"
         EOF
       '';
     in
