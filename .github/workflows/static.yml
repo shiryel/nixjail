@@ -30,27 +30,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install nix
-        uses: cachix/install-nix-action@v23
+        uses: cachix/install-nix-action@v27
 
       - name: Build docs
-        run: nix build .\#legacyPackages.x86_64-linux.docs.optionsCommonMark
+        run: |
+          nix build .\#legacyPackages.x86_64-linux.docs.optionsCommonMark
+          cat result > docs # for some reason, the symbolic link stopped working with docker...
 
       - name: Convert result
-        uses: docker://pandoc/core:3
+        uses: docker://pandoc/core:3.1
         with:
-          args: -f commonmark --output=result.html result
+          args: -f commonmark --output=/github/workspace/result.html /github/workspace/docs
 
       - name: Setup Pages
-        uses: actions/configure-pages@v3
+        uses: actions/configure-pages@v5
+
+      - name: Setup Directory
+        run: |
+          mkdir gh-pages
+          mv result.html gh-pages/index.html
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v2
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: './result.html'
+          path: ./gh-pages
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v2
+        uses: actions/deploy-pages@v4
