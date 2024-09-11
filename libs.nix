@@ -267,7 +267,8 @@ rec {
           bwrap_cmd=(
             ${getBin pkgs.bubblewrap}/bin/bwrap
             --tmpfs /
-            --ro-bind /nix /nix
+            --ro-bind-try /nix /nix
+            --ro-bind-try /etc /etc # required for /etc/xdg/xdg-desktop-portal/portals.conf
             --bind $XDG_RUNTIME_DIR $XDG_RUNTIME_DIR
             --bind /run/dbus/system_bus_socket /run/dbus/system_bus_socket
             ${_flatpak_info}
