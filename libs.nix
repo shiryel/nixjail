@@ -164,6 +164,8 @@ rec {
             "$HOME/.config/gtk-3.0/bookmarks"
             "$HOME/.config/gtk-4.0/settings.ini"
             "$HOME/.config/gtk-4.0/bookmarks"
+            "$HOME/.config/Kvantum/kvantum.kvconfig"
+            "$HOME/.config/Kvantum/Dracula-Solid"
           ] else [ ];
 
         _roBinds = pipe (roBinds ++ _extra_roBinds) [
@@ -570,7 +572,13 @@ rec {
             "--ro-bind /run/current-system /run/current-system"
             "--ro-bind /run/opengl-driver /run/opengl-driver"
             "--ro-bind /run/opengl-driver-32 /run/opengl-driver-32"
-            #"--ro-bind /etc/ssh/ssh_config /etc/ssh/ssh_config" # keep ssh config from host
+            "--ro-bind /etc/ssh/ssh_config /etc/ssh/ssh_config" # keep ssh config from host
+            # NOTE: 
+            # bwrap does not support user and group ID mapping: https://github.com/containers/bubblewrap/issues/468
+            # so docker and podman will not work on it
+            # Check with: /proc/self/uid_map
+            #"--ro-bind /etc/containers /etc/containers"
+            #"--ro-bind /run/docker.sock /run/docker.sock"
             "${xdg}"
             "--die-with-parent"
             "${new_session}"
