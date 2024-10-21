@@ -18,7 +18,7 @@
 # will use the overlay instead of the nixjail result, an workaround
 # is the usage of { new_name = package; } instead of { package = package; }
 
-{ lib, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 with builtins;
 with lib;
@@ -66,13 +66,17 @@ rec {
 
   genericArgs = (
     { name ? null
-    , args ? ''"$@"''
+    , pre_exec ? ""
+    , post_exec ? ''"$@"''
       # BWRAP
     , rwBinds ? [ ] # [string] | [{from: string; to: string;}]
     , roBinds ? [ ] # [string] | [{from: string; to: string;}]
     , autoBindHome ? true
     , homeDirRoot ? "$HOME/nixjail"
     , defaultBinds ? true
+    , trim_etc ? true
+    , cacert ? null
+    , resolv ? null
     , dri ? false # video acceleration
     , dev ? false # Vulkan support / devices usage
     , xdg ? false # true | false | "ro"
@@ -87,16 +91,20 @@ rec {
       # not recommended because of a security issue with TIOCSTI [1]
       # [1] - https://wiki.archlinux.org/title/Bubblewrap#New_session
     , keepSession ? false
+    , ldCache ? false
     , extraConfig ? [ ]
     }:
       assert isString name;
-      assert isString args;
+      assert isString pre_exec;
+      assert isString post_exec;
       # BWRAP
       assert isList rwBinds;
       assert isList roBinds;
       assert isBool autoBindHome;
       assert isString homeDirRoot;
       assert isBool defaultBinds;
+      assert cacert == null || (isDerivation cacert && trim_etc == true);
+      assert resolv == null || (isString resolv && trim_etc == true);
       assert isBool dri;
       assert isBool dev;
       assert asserts.assertOneOf "bwrap.xdg" xdg [ "ro" true false ];
@@ -108,6 +116,7 @@ rec {
       assert isAttrs dbusProxy;
       # EXTRA
       assert isBool keepSession;
+      assert isBool ldCache;
       assert isList extraConfig;
       let
         # eg: hello_world-test -> HelloWorldTest
@@ -166,6 +175,7 @@ rec {
             "$HOME/.config/gtk-4.0/bookmarks"
             "$HOME/.config/Kvantum/kvantum.kvconfig"
             "$HOME/.config/Kvantum/Dracula-Solid"
+            "/etc/nvim/snippets/"
           ] else [ ];
 
         _roBinds = pipe (roBinds ++ _extra_roBinds) [
@@ -202,6 +212,92 @@ rec {
         _tmp = if tmp then "--bind-try /tmp /tmp" else "--tmpfs /tmp";
         _ipc = if ipc then "" else "--unshare-ipc";
         _unshare = if unshareAll then "--unshare-all" else "";
+
+        #
+        # ETC
+        #
+
+        _trim_etc_entries =
+          let
+            files = [
+              # NixOS Compatibility
+              "nix" # mainly for nixUnstable users, but also for access to nix/netrc
+              # Shells
+              "shells"
+              "bashrc"
+              "zshenv"
+              "zshrc"
+              "zinputrc"
+              "zprofile"
+              # Users, Groups, NSS
+              "passwd"
+              "group"
+              "shadow"
+              "hosts"
+              #"resolv.conf"
+              "nsswitch.conf"
+              # User profiles
+              "profiles"
+              # Sudo & Su
+              "login.defs"
+              "sudoers"
+              "sudoers.d"
+              # Time
+              "localtime"
+              "zoneinfo"
+              # Other Core Stuff
+              "machine-id"
+              "os-release"
+              # PAM
+              "pam.d"
+              # Fonts
+              "fonts"
+              # ALSA
+              "alsa"
+              "asound.conf"
+            ];
+          in
+          pipe files [
+            (map (path: ''--ro-bind-try "/etc/${path}" "/etc/${path}"''))
+            (concatStringsSep "\n  ")
+          ];
+
+        # https://github.com/NixOS/nixpkgs/blob/nixos-unstable/nixos/modules/security/ca.nix
+        _cacert_path = "${cacert}/etc/ssl/certs/ca-bundle.crt";
+
+        _resolv =
+          if resolv != null then
+            "--ro-bind ${pkgs.writeText "resolv.conf" resolv} /etc/resolv.conf"
+          else
+            "--ro-bind /etc/resolv.conf /etc/resolv.conf";
+
+        _etc =
+          if trim_etc then
+            if cacert != null then ''
+              --tmpfs /etc/ssl/certs
+              --tmpfs /etc/pki/tls/certs
+              --ro-bind ${_cacert_path} /etc/ssl/certs/ca-certificates.crt
+              --ro-bind ${_cacert_path} /etc/ssl/certs/ca-bundle.crt
+              --ro-bind ${_cacert_path} /etc/pki/tls/certs/ca-bundle.crt
+              --ro-bind /etc/static /etc/static
+              --tmpfs /etc/static/ssl/certs
+              --tmpfs /etc/static/pki/tls/certs
+              --ro-bind ${_cacert_path} /etc/static/ssl/certs/ca-certificates.crt
+              --ro-bind ${_cacert_path} /etc/static/ssl/certs/ca-bundle.crt
+              --ro-bind ${_cacert_path} /etc/static/pki/tls/certs/ca-bundle.crt
+              ${_resolv}
+              ${_trim_etc_entries}
+            '' else
+              ''
+                --ro-bind /etc/static /etc/static
+                --ro-bind /etc/ssl /etc/ssl
+                --ro-bind /etc/pki /etc/pki
+                --ro-bind /etc/resolv.conf /etc/resolv.conf
+                ${_resolv}
+                ${_trim_etc_entries}
+              ''
+          else
+            "--ro-bind /etc /etc";
 
         ################
         # FLATPAK INFO #
@@ -313,12 +409,35 @@ rec {
         # EXTRA #
         #########
 
+        # ldCache code adapted from: https://github.com/NixOS/nixpkgs/blob/master/pkgs/build-support/build-fhsenv-bubblewrap/default.nix#L195
+        #
+        # Our glibc will look for the cache in its own path in `/nix/store`.
+        # As such, we need a cache to exist there, because pressure-vessel
+        # depends on the existence of an ld cache.
+        # Also, the cache needs to go to both 32 and 64 bit glibcs, for games
+        # of both architectures to work.
+        _ldCache =
+          if ldCache then
+            ''
+              --tmpfs ${pkgs.glibc}/etc
+              --symlink /etc/ld.so.conf ${pkgs.glibc}/etc/ld.so.conf
+              --symlink /etc/ld.so.cache ${pkgs.glibc}/etc/ld.so.cache
+              --ro-bind-try ${pkgs.glibc}/etc/rpc ${pkgs.glibc}/etc/rpc
+              --remount-ro ${pkgs.glibc}/etc
+              --tmpfs ${pkgsi686Linux.glibc}/etc
+              --symlink /etc/ld.so.conf ${pkgsi686Linux.glibc}/etc/ld.so.conf
+              --symlink /etc/ld.so.cache ${pkgsi686Linux.glibc}/etc/ld.so.cache
+              --ro-bind-try ${pkgsi686Linux.glibc}/etc/rpc ${pkgsi686Linux.glibc}/etc/rpc
+              --remount-ro ${pkgsi686Linux.glibc}/etc
+            ''
+          else
+            "";
+
         _new_session = if keepSession then "" else "--new-session";
         _extraConfig = concatStringsSep " " extraConfig;
       in
       {
-        name = name;
-        args = args;
+        inherit name pre_exec post_exec;
         rwBinds = _rwBinds;
         roBinds = _roBinds;
         mkdir = _mkdir;
@@ -332,6 +451,8 @@ rec {
         dbusProxy = _dbus_proxy;
         dbusBinds = _dbus_binds;
         new_session = _new_session;
+        etc = _etc;
+        ldCache = _ldCache;
         extraConfig = _extraConfig;
       }
   );
@@ -356,42 +477,14 @@ rec {
   bwrapItArgs = (
     { package ? null
     , symlinkJoin ? true
-    , ldCache ? false
     , removeDesktopItems ? false
     , ...
     }@args:
       assert package != null;
-      assert isBool ldCache;
       assert isBool removeDesktopItems;
       assert isBool symlinkJoin;
-      let
-        # ldCache code adapted from: https://github.com/NixOS/nixpkgs/blob/master/pkgs/build-support/build-fhsenv-bubblewrap/default.nix#L195
-        #
-        # Our glibc will look for the cache in its own path in `/nix/store`.
-        # As such, we need a cache to exist there, because pressure-vessel
-        # depends on the existence of an ld cache.
-        # Also, the cache needs to go to both 32 and 64 bit glibcs, for games
-        # of both architectures to work.
-        _ldCache =
-          if ldCache then
-            ''
-              --tmpfs ${pkgs.glibc}/etc
-              --symlink /etc/ld.so.conf ${pkgs.glibc}/etc/ld.so.conf
-              --symlink /etc/ld.so.cache ${pkgs.glibc}/etc/ld.so.cache
-              --ro-bind-try ${pkgs.glibc}/etc/rpc ${pkgs.glibc}/etc/rpc
-              --remount-ro ${pkgs.glibc}/etc
-              --tmpfs ${pkgsi686Linux.glibc}/etc
-              --symlink /etc/ld.so.conf ${pkgsi686Linux.glibc}/etc/ld.so.conf
-              --symlink /etc/ld.so.cache ${pkgsi686Linux.glibc}/etc/ld.so.cache
-              --ro-bind-try ${pkgsi686Linux.glibc}/etc/rpc ${pkgsi686Linux.glibc}/etc/rpc
-              --remount-ro ${pkgsi686Linux.glibc}/etc
-            ''
-          else
-            "";
-      in
-      (genericArgs (removeAttrs args [ "package" "symlinkJoin" "removeDesktopItems" "ldCache" ])) // {
+      (genericArgs (removeAttrs args [ "package" "symlinkJoin" "removeDesktopItems" ])) // {
         inherit package symlinkJoin removeDesktopItems;
-        ldCache = _ldCache;
       }
   );
 
@@ -400,6 +493,7 @@ rec {
     , dbusProxy
     , mkdir
     , xdg
+    , etc
     , ldCache
     , new_session
     , unshare
@@ -412,7 +506,8 @@ rec {
     , flatpak_info
     , dbusBinds
     , extraConfig
-    , args
+    , pre_exec
+    , post_exec
     , removeDesktopItems
     , ...
     }: override_attrs:
@@ -442,6 +537,8 @@ rec {
             ${getBin pkgs.bubblewrap}/bin/bwrap
             --tmpfs /
             --tmpfs /run
+            --tmpfs /home
+            --proc /proc
             --ro-bind-try /run/booted-system /run/booted-system
             --ro-bind-try /run/current-system /run/current-system
             --ro-bind-try /run/opengl-driver /run/opengl-driver
@@ -450,30 +547,28 @@ rec {
             # fix sh and bash for some scripts
             --ro-bind-try /bin/sh /bin/sh
             --ro-bind-try /bin/sh /bin/bash
-            --ro-bind-try /etc /etc
             --ro-bind-try /nix /nix
             --ro-bind-try /sys /sys
             --ro-bind-try /var /var
             --ro-bind-try /usr /usr
-            --ro-bind-try /opt /opt
+            ${etc}
             ${flatpak_info}
-            --proc /proc
-            --tmpfs /home
-            --tmpfs /keep
             --die-with-parent
             ${ldCache}
             ${new_session}
             ${unshare}
             ${dev_or_dri}
             ${net}
-            ${tmp}
             ${ipc}
+            ${tmp}
+            # https://github.com/flatpak/flatpak/blob/be2de97e862e5ca223da40a895e54e7bf24dbfb9/common/flatpak-run.c#L285
+            --tmpfs /tmp/.X11-unix
             ${rwBinds}
             ${roBinds}
             ${dbusBinds}
             ${extraConfig}
             --
-            "$_path/$_i" ${args}
+            ${pre_exec} "$_path/$_i" ${post_exec}
           )
           #exec -a "$0" "''${cmd[@]}"
           exec "''${cmd[@]}"
@@ -533,65 +628,83 @@ rec {
       }
   );
 
+  # based on: https://github.com/NixOS/nixpkgs/blob/master/pkgs/build-support/build-fhsenv-bubblewrap/default.nix
   fhsUserEnv =
     { name
     , dbusProxy
     , mkdir
     , runScript
-    , args
+    , pre_exec
+    , post_exec
     , targetPkgs
     , multiPkgs
     , profile
     , xdg
+    , etc
     , new_session
     , unshare
     , dev_or_dri
     , net
     , tmp
+    , ipc
     , rwBinds
     , roBinds
+    , flatpak_info
     , dbusBinds
+    , ldCache
     , extraConfig
     , ...
     }:
     let
-      FHS =
-        pkgs.buildFHSUserEnvBubblewrap {
-          name = "${name}";
-          runScript = "${runScript} ${args}";
-          targetPkgs = targetPkgs;
-          multiPkgs = multiPkgs;
-          profile = profile;
-          extraOutputsToInstall = [ "dev" ];
-          extraBwrapArgs = [
-            "--proc /proc"
-            "--tmpfs /home"
-            "--tmpfs /keep"
-            "--tmpfs /run"
-            "--ro-bind /run/booted-system /run/booted-system"
-            "--ro-bind /run/current-system /run/current-system"
-            "--ro-bind /run/opengl-driver /run/opengl-driver"
-            "--ro-bind /run/opengl-driver-32 /run/opengl-driver-32"
-            "--ro-bind /etc/ssh/ssh_config /etc/ssh/ssh_config" # keep ssh config from host
-            # NOTE: 
-            # bwrap does not support user and group ID mapping: https://github.com/containers/bubblewrap/issues/468
-            # so docker and podman will not work on it
-            # Check with: /proc/self/uid_map
-            #"--ro-bind /etc/containers /etc/containers"
-            #"--ro-bind /run/docker.sock /run/docker.sock"
-            "${xdg}"
-            "--die-with-parent"
-            "${new_session}"
-            "${unshare}"
-            "${dev_or_dri}"
-            "${net}"
-            "${tmp}"
-            "${rwBinds}"
-            "${roBinds}"
-            "${dbusBinds}"
-            "${extraConfig}"
-          ];
-        };
+      # not the same as pkgs.buildFHSEnv
+      buildFHSEnv = pkgs.callPackage "${config.nixpkgs.flake.source}/pkgs/build-support/build-fhsenv-bubblewrap/buildFHSEnv.nix" { };
+      fhsenv = buildFHSEnv {
+        inherit name targetPkgs multiPkgs profile;
+        extraOutputsToInstall = [ "dev" ];
+      };
+
+      bwrap_script = ''
+        cmd=(
+          ${getBin pkgs.bubblewrap}/bin/bwrap
+          --tmpfs /
+          --tmpfs /run
+          --tmpfs /home
+          --proc /proc
+          --ro-bind-try /run/booted-system /run/booted-system
+          --ro-bind-try /run/current-system /run/current-system
+          --ro-bind-try /run/opengl-driver /run/opengl-driver
+          --ro-bind-try /run/opengl-driver-32 /run/opengl-driver-32
+          ${xdg}
+          --ro-bind-try ${fhsenv}/bin /bin
+          --ro-bind-try ${fhsenv}/sbin /sbin
+          --ro-bind-try ${fhsenv}/lib /lib
+          --ro-bind-try ${fhsenv}/lib64 /lib64
+          --ro-bind-try ${fhsenv}/lib32 /lib32
+          --ro-bind-try ${fhsenv}/usr /usr
+          --ro-bind-try /nix /nix
+          --ro-bind-try /sys /sys
+          --ro-bind-try /var /var
+          ${etc}
+          ${flatpak_info}
+          --die-with-parent
+          ${ldCache}
+          ${new_session}
+          ${unshare}
+          ${dev_or_dri}
+          ${net}
+          ${ipc}
+          ${tmp}
+          # https://github.com/flatpak/flatpak/blob/be2de97e862e5ca223da40a895e54e7bf24dbfb9/common/flatpak-run.c#L285
+          --tmpfs /tmp/.X11-unix
+          ${rwBinds}
+          ${roBinds}
+          ${dbusBinds}
+          ${extraConfig}
+          --
+          bash -c 'source ${fhsenv}/etc/profile && ${pre_exec} ${runScript} ${post_exec}'
+        )
+        exec "''${cmd[@]}"
+      '';
     in
     pkgs.writeScriptBin name ''
       #! ${pkgs.stdenv.shell} -e
@@ -600,6 +713,6 @@ rec {
 
       ${mkdir}
 
-      ${FHS}/bin/${name}
+      ${bwrap_script}
     '';
 }

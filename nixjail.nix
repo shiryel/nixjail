@@ -40,10 +40,16 @@ with my_lib;
           description = mdDoc "Add package to `environment.systemPackages`";
         };
 
-        args = mkOption {
+        post_exec = mkOption {
           default = ''"$@"'';
           type = str;
           description = mdDoc "arguments to pass to the packages";
+        };
+
+        pre_exec = mkOption {
+          default = "";
+          type = str;
+          description = mdDoc "commands before the exec";
         };
 
         #
@@ -90,6 +96,24 @@ with my_lib;
           default = false;
           type = bool;
           description = mdDoc "Share IPC";
+        };
+
+        trim_etc = mkOption {
+          default = true;
+          type = bool;
+          description = mdDoc "Only ro-bind the essential on /etc";
+        };
+
+        cacert = mkOption {
+          default = null;
+          type = nullOr package;
+          description = mdDoc "replace cacert package. (requires trim_etc = true)";
+        };
+
+        resolv = mkOption {
+          default = null;
+          type = nullOr str;
+          description = mdDoc "replace /etc/resolv.conf. (requires trim_etc = true)";
         };
 
         rwBinds = mkOption {
@@ -222,6 +246,12 @@ with my_lib;
           '';
         };
 
+        ldCache = mkOption {
+          default = false;
+          type = bool;
+          description = mdDoc "Add ld.so.conf and ld.so.cache symlinks (both 32 and 64 bit glibcs)";
+        };
+
         extraConfig = mkOption {
           default = [ ];
           type = listOf str;
@@ -330,12 +360,6 @@ with my_lib;
                 default = false;
                 type = bool;
                 description = mdDoc "Removes all desktop items from derivation, requires `symlinkJoin = false` to work";
-              };
-
-              ldCache = mkOption {
-                default = false;
-                type = bool;
-                description = mdDoc "Add ld.so.conf and ld.so.cache symlinks (both 32 and 64 bit glibcs)";
               };
             } // shared_options;
           });
