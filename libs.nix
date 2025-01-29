@@ -403,7 +403,10 @@ rec {
             --bind $XDG_RUNTIME_DIR/dbus-proxy-${name}-bus $XDG_RUNTIME_DIR/bus
             --bind $XDG_RUNTIME_DIR/dbus-proxy-${name}-system_bus /run/dbus/system_bus_socket
           '' else
-            "--ro-bind $XDG_RUNTIME_DIR/bus $XDG_RUNTIME_DIR/bus";
+            ''
+              --ro-bind-try /run/dbus/system_bus_socket /run/dbus/system_bus_socket
+              --ro-bind $XDG_RUNTIME_DIR/bus $XDG_RUNTIME_DIR/bus
+            '';
 
         #########
         # EXTRA #
@@ -545,14 +548,13 @@ rec {
             --ro-bind-try /run/opengl-driver-32 /run/opengl-driver-32
             ${xdg}
             # fix sh and bash for some scripts
-            --ro-bind-try /bin/sh /bin/sh
-            --ro-bind-try /bin/sh /bin/bash
+            --ro-bind-try ${pkgs.bash}/bin/sh /bin/sh
+            --ro-bind-try ${pkgs.bash}/bin/bash /bin/bash
             --ro-bind-try /nix /nix
             --ro-bind-try /sys /sys
             --ro-bind-try /var /var
             --ro-bind-try /usr /usr
             ${etc}
-            ${flatpak_info}
             --die-with-parent
             ${ldCache}
             ${new_session}
@@ -566,6 +568,7 @@ rec {
             ${rwBinds}
             ${roBinds}
             ${dbusBinds}
+            ${flatpak_info}
             ${extraConfig}
             --
             ${pre_exec} "$_path/$_i" ${post_exec}
@@ -675,7 +678,9 @@ rec {
           --ro-bind-try /run/opengl-driver /run/opengl-driver
           --ro-bind-try /run/opengl-driver-32 /run/opengl-driver-32
           ${xdg}
-          --ro-bind-try ${fhsenv}/bin /bin
+          --ro-bind-try ${pkgs.coreutils}/bin/env /bin/env
+          --ro-bind-try ${pkgs.bash}/bin/sh /bin/sh
+          --ro-bind-try ${pkgs.bash}/bin/bash /bin/bash
           --ro-bind-try ${fhsenv}/sbin /sbin
           --ro-bind-try ${fhsenv}/lib /lib
           --ro-bind-try ${fhsenv}/lib64 /lib64
@@ -685,7 +690,6 @@ rec {
           --ro-bind-try /sys /sys
           --ro-bind-try /var /var
           ${etc}
-          ${flatpak_info}
           --die-with-parent
           ${ldCache}
           ${new_session}
@@ -699,6 +703,7 @@ rec {
           ${rwBinds}
           ${roBinds}
           ${dbusBinds}
+          ${flatpak_info}
           ${extraConfig}
           --
           bash -c 'source ${fhsenv}/etc/profile && ${pre_exec} ${runScript} ${post_exec}'
