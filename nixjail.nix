@@ -437,6 +437,6 @@ with my_lib;
       assert isList bwrap_overlays;
       assert isFunction fhs_overlays;
       # order matters
-      [ fhs_overlays ] ++ bwrap_overlays;
+      lib.mkOrder 1600 ([ fhs_overlays ] ++ bwrap_overlays);
   };
 }

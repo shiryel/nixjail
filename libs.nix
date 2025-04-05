@@ -484,6 +484,7 @@ rec {
     , ...
     }@args:
       assert package != null;
+      assert assertMsg (isDerivation package) "${args.name} is not a derivation";
       assert isBool removeDesktopItems;
       assert isBool symlinkJoin;
       (genericArgs (removeAttrs args [ "package" "symlinkJoin" "removeDesktopItems" ])) // {
@@ -604,7 +605,13 @@ rec {
           out_path="$out/share/applications/$i"
 
           cp $desktop_path/$i $out_path
-          substituteInPlace $out_path --replace "${_package}" "$out"
+
+          # invalidate an absolute path to make sure that it's getting replaced
+          substituteInPlace $out_path --replace "/nix/store" "/invalid/nix/store"
+          substituteInPlace $out_path --replace "/invalid${_package}" "$out"
+
+          # uses absolute paths to not rely on $PATH
+          # NOTE: it does not use the symlink path!
           substituteInPlace $out_path --replace "Exec=${_main_program}" "Exec=$out/bin/${_main_program}"
         done
       '');
