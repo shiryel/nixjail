@@ -52,9 +52,70 @@ with my_lib;
           description = mdDoc "commands before the exec";
         };
 
+        runWithSystemd = mkOption {
+          default = false;
+          type = bool;
+          description = mdDoc "use systemd-run";
+        };
+
         #
         # BWRAP
         #
+
+        # Namespaces
+
+        shareNamespace = {
+          user = mkOption {
+            default = false;
+            type = bool;
+            description = mdDoc ''Share user namespace (otherwise, "root" files will belong to "nobody")'';
+          };
+
+          ipc = mkOption {
+            default = false;
+            type = bool;
+            description = mdDoc "Share ipc namespace (POSIX message queues / SYSV IPC)";
+          };
+
+          pid = mkOption {
+            default = false;
+            type = bool;
+            description = mdDoc ''
+              Share pid namespace.
+
+              NOTE: Enabling pid namespaces allows sending signals to sub-processes, required by plugins like auto-session and persisted from neovim.
+              Some processes may also need the following patch to receive signals: https://github.com/containers/bubblewrap/pull/586
+            '';
+          };
+
+          net = mkOption {
+            default = true;
+            type = bool;
+            description = mdDoc "Share network namespace";
+          };
+
+          uts = mkOption {
+            default = false;
+            type = bool;
+            description = mdDoc "Share uts namespace (keeps hostname)";
+          };
+
+          cgroup = mkOption {
+            default = false;
+            type = bool;
+            description = mdDoc "Share cgroup namespace";
+          };
+        };
+
+        # Env
+
+        clearenv = mkOption {
+          default = false;
+          type = bool;
+          description = mdDoc "Unset all environment variables, except for PWD and any that are subsequently set by --setenv";
+        };
+
+        # Binds
 
         autoBindHome = mkOption {
           default = true;
@@ -80,22 +141,10 @@ with my_lib;
           description = mdDoc "If `true` add `--bind-try $XDG_RUNTIME_DIR $XDG_RUNTIME_DIR`";
         };
 
-        net = mkOption {
-          default = false;
-          type = bool;
-          description = mdDoc "If `true` add `--share-net`";
-        };
-
         tmp = mkOption {
           default = false;
           type = bool;
           description = mdDoc "If `true` add `--bind-try /tmp /tmp`";
-        };
-
-        ipc = mkOption {
-          default = false;
-          type = bool;
-          description = mdDoc "Share IPC";
         };
 
         trim_etc = mkOption {
@@ -141,12 +190,6 @@ with my_lib;
             "$HOME/.config/gtk-4.0/settings.ini"
             "$HOME/.gtkrc-2.0"
           '';
-        };
-
-        unshareAll = mkOption {
-          default = true;
-          type = bool;
-          description = mdDoc "If `false` removes `--unshare-all`, not recommended!";
         };
 
         #

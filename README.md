@@ -63,7 +63,6 @@ After adding NixJail as a module you can use it anywhere on your config, eg:
         # you can also override the derivations of the profile:
         discord = p.discord.override { nss = p.nss_latest; };
       };
-      net = true;
       dri = true;
       rwBinds = [ "$HOME/Downloads" ]; # Make sure to use `$HOME` instead of `~`
     }
@@ -85,7 +84,6 @@ Here some examples making use of some advanced NixJail options, [read the docs](
         # Firefox
         {
           packages = f: p: with p; { firefox = firefox; };
-          net = true;
           dri = true;
           xdg = true;
           autoBindHome = false;
@@ -113,7 +111,6 @@ Here some examples making use of some advanced NixJail options, [read the docs](
             };
           };
           dri = true; # required for vulkan
-          net = true;
           xdg = true;
           rwBinds = [ "$HOME/Downloads" ];
           extraConfig = [
@@ -138,7 +135,6 @@ Here some examples making use of some advanced NixJail options, [read the docs](
           name = "code-workspace";
           runScript = "foot";
           dev = true;
-          net = true;
           roBinds = [
             "$HOME/.config/foot/foot.ini"
             "$HOME/.zshrc"

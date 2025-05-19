@@ -14,10 +14,6 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this library. If not, see <https://www.gnu.org/licenses/>.
 
-# TODO: some times when using nixjail with an overlay the nixos
-# will use the overlay instead of the nixjail result, an workaround
-# is the usage of { new_name = package; } instead of { package = package; }
-
 { config, lib, pkgs, ... }:
 
 with builtins;
@@ -68,6 +64,7 @@ rec {
     { name ? null
     , pre_exec ? ""
     , post_exec ? ''"$@"''
+    , runWithSystemd ? false
       # BWRAP
     , rwBinds ? [ ] # [string] | [{from: string; to: string;}]
     , roBinds ? [ ] # [string] | [{from: string; to: string;}]
@@ -77,14 +74,12 @@ rec {
     , trim_etc ? true
     , cacert ? null
     , resolv ? null
+    , xdg ? false # true | false | "ro"
     , dri ? false # video acceleration
     , dev ? false # Vulkan support / devices usage
-    , xdg ? false # true | false | "ro"
-    , net ? false
     , tmp ? false # some tray icons needs it
-    , ipc ? false
-    , unshareAll ? true
-      # DBUS PROXY
+    , clearenv ? false
+    , shareNamespace ? { }
     , dbusProxy ? { }
       # EXTRA
       # Fixes "cannot set terminal process group (-1)" but is 
@@ -97,6 +92,7 @@ rec {
       assert isString name;
       assert isString pre_exec;
       assert isString post_exec;
+      assert isBool runWithSystemd;
       # BWRAP
       assert isList rwBinds;
       assert isList roBinds;
@@ -105,13 +101,18 @@ rec {
       assert isBool defaultBinds;
       assert cacert == null || (isDerivation cacert && trim_etc == true);
       assert resolv == null || (isString resolv && trim_etc == true);
+      assert asserts.assertOneOf "bwrap.xdg" xdg [ "ro" true false ];
       assert isBool dri;
       assert isBool dev;
-      assert asserts.assertOneOf "bwrap.xdg" xdg [ "ro" true false ];
-      assert isBool net;
       assert isBool tmp;
-      assert isBool ipc;
-      assert isBool unshareAll;
+      assert isBool clearenv;
+      assert isAttrs shareNamespace;
+      assert isBool shareNamespace.user;
+      assert isBool shareNamespace.ipc;
+      assert isBool shareNamespace.pid;
+      assert isBool shareNamespace.net;
+      assert isBool shareNamespace.uts;
+      assert isBool shareNamespace.cgroup;
       # DBUS PROXY
       assert isAttrs dbusProxy;
       # EXTRA
@@ -208,10 +209,15 @@ rec {
             $(for file in `ls "$XDG_RUNTIME_DIR/"{pipewire,wayland}-*`; do echo "--ro-bind $file $file"; done)
           '';
 
-        _net = if net then "--share-net" else "";
+        _ns_user = if shareNamespace.user then "" else "--unshare-user";
+        _ns_ipc = if shareNamespace.ipc then "" else "--unshare-ipc";
+        _ns_pid = if shareNamespace.pid then "" else "--unshare-pid";
+        _ns_net = if shareNamespace.net then "" else "--unshare-net";
+        _ns_uts = if shareNamespace.uts then "" else "--unshare-uts";
+        _ns_cgroup = if shareNamespace.cgroup then "" else "--unshare-cgroup";
+
+        _clearenv = if clearenv then "--clearenv" else "";
         _tmp = if tmp then "--bind-try /tmp /tmp" else "--tmpfs /tmp";
-        _ipc = if ipc then "" else "--unshare-ipc";
-        _unshare = if unshareAll then "--unshare-all" else "";
 
         #
         # ETC
@@ -328,7 +334,7 @@ rec {
             name = "com.nixjail.${_normalized_name}";
             runtime = "runtime/com.nixjail.Platform/${pkgs.hostPlatform.parsed.cpu.name}";
           };
-          Context.shared = concatStringsSep ";" ((lib.optional net "network") ++ (lib.optional ipc "ipc"));
+          Context.shared = concatStringsSep ";" ((lib.optional shareNamespace.net "network") ++ (lib.optional shareNamespace.ipc "ipc"));
           "Session Bus Policy" =
             let
               mapPolicies = policies: type: builtins.map (x: { name = x; value = type; }) policies;
@@ -440,16 +446,19 @@ rec {
         _extraConfig = concatStringsSep " " extraConfig;
       in
       {
-        inherit name pre_exec post_exec;
+        inherit name pre_exec post_exec runWithSystemd;
         rwBinds = _rwBinds;
         roBinds = _roBinds;
         mkdir = _mkdir;
         dev_or_dri = _dev_or_dri;
         xdg = _xdg;
-        net = _net;
         tmp = _tmp;
-        ipc = _ipc;
-        unshare = _unshare;
+        ns_user = _ns_user;
+        ns_ipc = _ns_ipc;
+        ns_pid = _ns_pid;
+        ns_net = _ns_net;
+        ns_uts = _ns_uts;
+        ns_cgroup = _ns_cgroup;
         flatpak_info = _flatpak_info;
         dbusProxy = _dbus_proxy;
         dbusBinds = _dbus_binds;
@@ -494,17 +503,21 @@ rec {
 
   bwrapDerivataion =
     { package
+    , runWithSystemd
     , dbusProxy
     , mkdir
     , xdg
     , etc
     , ldCache
     , new_session
-    , unshare
     , dev_or_dri
-    , net
     , tmp
-    , ipc
+    , ns_user
+    , ns_ipc
+    , ns_pid
+    , ns_net
+    , ns_uts
+    , ns_cgroup
     , rwBinds
     , roBinds
     , flatpak_info
@@ -523,7 +536,7 @@ rec {
         # We need to split this script in 2 EOFs, because of how the $ interact with bash and nix
         # in the case of this EOF, we set the envs that will be used by the next EOF
         cat << EOF > "$out_path"
-          #!${pkgs.stdenv.shell} -e
+          #!${pkgs.stdenv.shell} -eu -o pipefail
           #set -eux -o pipefail
 
           _path="${path_var}"
@@ -559,11 +572,9 @@ rec {
             --die-with-parent
             ${ldCache}
             ${new_session}
-            ${unshare}
             ${dev_or_dri}
-            ${net}
-            ${ipc}
             ${tmp}
+            ${ns_user} ${ns_ipc} ${ns_pid} ${ns_net} ${ns_uts} ${ns_cgroup}
             # https://github.com/flatpak/flatpak/blob/be2de97e862e5ca223da40a895e54e7bf24dbfb9/common/flatpak-run.c#L285
             --tmpfs /tmp/.X11-unix
             ${rwBinds}
@@ -575,7 +586,12 @@ rec {
             ${pre_exec} "$_path/$_i" ${post_exec}
           )
           #exec -a "$0" "''${cmd[@]}"
-          exec "''${cmd[@]}"
+          ${
+          if runWithSystemd then 
+            ''systemd-run --user --collect --same-dir --quiet --slice "app-${_main_program}" --property=Type=exec --property=ExitType=cgroup -- "''${cmd[@]}"''
+          else
+          ''exec "''${cmd[@]}"''
+          }
         EOF
       '';
     in
@@ -641,6 +657,7 @@ rec {
   # based on: https://github.com/NixOS/nixpkgs/blob/master/pkgs/build-support/build-fhsenv-bubblewrap/default.nix
   fhsUserEnv =
     { name
+    , runWithSystemd
     , dbusProxy
     , mkdir
     , runScript
@@ -652,11 +669,14 @@ rec {
     , xdg
     , etc
     , new_session
-    , unshare
     , dev_or_dri
-    , net
     , tmp
-    , ipc
+    , ns_user
+    , ns_ipc
+    , ns_pid
+    , ns_net
+    , ns_uts
+    , ns_cgroup
     , rwBinds
     , roBinds
     , flatpak_info
@@ -700,11 +720,9 @@ rec {
           --die-with-parent
           ${ldCache}
           ${new_session}
-          ${unshare}
           ${dev_or_dri}
-          ${net}
-          ${ipc}
           ${tmp}
+          ${ns_user} ${ns_ipc} ${ns_pid} ${ns_net} ${ns_uts} ${ns_cgroup}
           # https://github.com/flatpak/flatpak/blob/be2de97e862e5ca223da40a895e54e7bf24dbfb9/common/flatpak-run.c#L285
           --tmpfs /tmp/.X11-unix
           ${rwBinds}
@@ -715,7 +733,12 @@ rec {
           --
           bash -c 'source ${fhsenv}/etc/profile && ${pre_exec} ${runScript} ${post_exec}'
         )
-        exec "''${cmd[@]}"
+        ${
+          if runWithSystemd then 
+            ''systemd-run --user --collect --same-dir --quiet --slice "app-${_main_program}" --property=Type=exec --property=ExitType=cgroup -- "''${cmd[@]}"''
+          else
+          ''exec "''${cmd[@]}"''
+        }
       '';
     in
     pkgs.writeScriptBin name ''
