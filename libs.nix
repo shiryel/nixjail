@@ -731,11 +731,11 @@ rec {
           ${flatpak_info}
           ${extraConfig}
           --
-          bash -c 'source ${fhsenv}/etc/profile && ${pre_exec} ${runScript} ${post_exec}'
+          ${pkgs.bash}/bin/bash -c 'source ${fhsenv}/etc/profile && ${pre_exec} ${runScript} ${post_exec}'
         )
         ${
           if runWithSystemd then 
-            ''systemd-run --user --collect --same-dir --quiet --slice "app-${_main_program}" --property=Type=exec --property=ExitType=cgroup -- "''${cmd[@]}"''
+            ''systemd-run --user --collect --same-dir --quiet --slice "fhs-${name}" --property=Type=exec --property=ExitType=cgroup -- "''${cmd[@]}"''
           else
           ''exec "''${cmd[@]}"''
         }
