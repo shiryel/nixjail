@@ -147,6 +147,12 @@ with my_lib;
           description = mdDoc "If `true` add `--bind-try /tmp /tmp`";
         };
 
+        xorg = mkOption {
+          default = false;
+          type = bool;
+          description = mdDoc "If `true` add `--ro-bind-try /tmp/.X11-unix/X0 /tmp/.X11-unix/X0`";
+        };
+
         trim_etc = mkOption {
           default = true;
           type = bool;

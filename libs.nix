@@ -78,6 +78,7 @@ rec {
     , dri ? false # video acceleration
     , dev ? false # Vulkan support / devices usage
     , tmp ? false # some tray icons needs it
+    , xorg ? false # share .X11-unix/X0 socket
     , clearenv ? false
     , shareNamespace ? { }
     , dbusProxy ? { }
@@ -218,6 +219,9 @@ rec {
 
         _clearenv = if clearenv then "--clearenv" else "";
         _tmp = if tmp then "--bind-try /tmp /tmp" else "--tmpfs /tmp";
+
+        # https://github.com/flatpak/flatpak/blob/be2de97e862e5ca223da40a895e54e7bf24dbfb9/common/flatpak-run.c#L285
+        _xorg = if xorg then ''--ro-bind-try "/tmp/.X11-unix/X0" "/tmp/.X11-unix/X0"'' else "--tmpfs /tmp/.X11-unix";
 
         #
         # ETC
@@ -453,6 +457,7 @@ rec {
         dev_or_dri = _dev_or_dri;
         xdg = _xdg;
         tmp = _tmp;
+        xorg = _xorg;
         ns_user = _ns_user;
         ns_ipc = _ns_ipc;
         ns_pid = _ns_pid;
@@ -512,6 +517,7 @@ rec {
     , new_session
     , dev_or_dri
     , tmp
+    , xorg
     , ns_user
     , ns_ipc
     , ns_pid
@@ -574,9 +580,8 @@ rec {
             ${new_session}
             ${dev_or_dri}
             ${tmp}
+            ${xorg}
             ${ns_user} ${ns_ipc} ${ns_pid} ${ns_net} ${ns_uts} ${ns_cgroup}
-            # https://github.com/flatpak/flatpak/blob/be2de97e862e5ca223da40a895e54e7bf24dbfb9/common/flatpak-run.c#L285
-            --tmpfs /tmp/.X11-unix
             ${rwBinds}
             ${roBinds}
             ${dbusBinds}
@@ -671,6 +676,7 @@ rec {
     , new_session
     , dev_or_dri
     , tmp
+    , xorg
     , ns_user
     , ns_ipc
     , ns_pid
@@ -722,9 +728,8 @@ rec {
           ${new_session}
           ${dev_or_dri}
           ${tmp}
+          ${xorg}
           ${ns_user} ${ns_ipc} ${ns_pid} ${ns_net} ${ns_uts} ${ns_cgroup}
-          # https://github.com/flatpak/flatpak/blob/be2de97e862e5ca223da40a895e54e7bf24dbfb9/common/flatpak-run.c#L285
-          --tmpfs /tmp/.X11-unix
           ${rwBinds}
           ${roBinds}
           ${dbusBinds}
