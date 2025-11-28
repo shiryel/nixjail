@@ -590,11 +590,11 @@ rec {
             --
             ${pre_exec} "$_path/$_i" ${post_exec}
           )
-          #exec -a "$0" "''${cmd[@]}"
           ${
           if runWithSystemd then 
-            ''systemd-run --user --collect --same-dir --quiet --slice "app-${_main_program}" --property=Type=exec --property=ExitType=cgroup -- "''${cmd[@]}"''
+            ''systemd-run --user --collect --same-dir --quiet --slice "app-${_main_program}" --property=Type=exec --property=ExitType=cgroup -- ${lib.getExe pkgs.bash} -c -- "''${cmd[@]}"''
           else
+          #exec -a "$0" "''${cmd[@]}"
           ''exec "''${cmd[@]}"''
           }
         EOF
@@ -740,7 +740,7 @@ rec {
         )
         ${
           if runWithSystemd then 
-            ''systemd-run --user --collect --same-dir --quiet --slice "fhs-${name}" --property=Type=exec --property=ExitType=cgroup -- "''${cmd[@]}"''
+            ''systemd-run --user --collect --same-dir --quiet --slice "fhs-${name}" --property=Type=exec --property=ExitType=cgroup -- ${lib.getExe pkgs.bash} -c -- "''${cmd[@]}"''
           else
           ''exec "''${cmd[@]}"''
         }
