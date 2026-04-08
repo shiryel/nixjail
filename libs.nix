@@ -336,7 +336,7 @@ rec {
         _flatpak_info_data = pkgs.writeText "flatpak-info" (lib.generators.toINI { } {
           Application = {
             name = "com.nixjail.${_normalized_name}";
-            runtime = "runtime/com.nixjail.Platform/${pkgs.hostPlatform.parsed.cpu.name}";
+            runtime = "runtime/com.nixjail.Platform/${pkgs.stdenv.hostPlatform.parsed.cpu.name}";
           };
           Context.shared = concatStringsSep ";" ((lib.optional shareNamespace.net "network") ++ (lib.optional shareNamespace.ipc "ipc"));
           "Session Bus Policy" =
