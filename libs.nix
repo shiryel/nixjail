@@ -542,11 +542,12 @@ rec {
         # We need to split this script in 2 EOFs, because of how the $ interact with bash and nix
         # in the case of this EOF, we set the envs that will be used by the next EOF
         cat << EOF > "$out_path"
-          #!${pkgs.stdenv.shell} -eu -o pipefail
-          #set -eux -o pipefail
+        #!${pkgs.stdenv.shell}
+        set -euo pipefail
+        #set -eux -o pipefail
 
-          _path="${path_var}"
-          _i="$i"
+        _path="${path_var}"
+        _i="$i"
         EOF
 
         # this EOF is special, 'EOF' escapes all $ by default, preventing unexpected iteractions
